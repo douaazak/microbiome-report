@@ -1,14 +1,27 @@
 import { useState } from 'react';
-import { RANKS, type Rank } from 'microbiome-core';
+import {
+  looksLikeXlsx,
+  RANKS,
+  readXlsx,
+  xlsxToTsv,
+  type Rank,
+} from 'microbiome-core';
 
 import { AlphaPanel } from './components/AlphaPanel';
 import { BetaPanel } from './components/BetaPanel';
 import { CompositionPanel } from './components/CompositionPanel';
 import { DifferentialPanel } from './components/DifferentialPanel';
+import { OverviewPanel } from './components/OverviewPanel';
 import { Select } from './components/Select';
 import { loadDataset, type Dataset, type InputKind } from './lib/load';
 
-const TABS = ['Composition', 'Alpha diversity', 'Beta diversity', 'Differential'] as const;
+const TABS = [
+  'Overview',
+  'Composition',
+  'Alpha diversity',
+  'Beta diversity',
+  'Differential',
+] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -20,7 +33,7 @@ export default function App() {
 
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('Composition');
+  const [tab, setTab] = useState<Tab>('Overview');
 
   function run(
     overrides: Partial<{
@@ -38,8 +51,8 @@ export default function App() {
     const activeKind = overrides.kind ?? kind;
     const activeRank = overrides.rank ?? rank;
 
-    if (!table || !meta) {
-      setError('A feature table and a metadata file are both required.');
+    if (!table) {
+      setError('A feature table is required.');
       return;
     }
 
@@ -70,11 +83,17 @@ export default function App() {
 
   async function loadDemo() {
     try {
-      const [table, taxonomy, meta] = await Promise.all([
-        fetch('./demo/feature-table.tsv').then((r) => r.text()),
-        fetch('./demo/taxonomy.tsv').then((r) => r.text()),
-        fetch('./demo/metadata.tsv').then((r) => r.text()),
-      ]);
+      // The standalone single-file build embeds the demo data, because a
+      // file:// page cannot fetch its siblings. Fall back to fetching when
+      // running normally from a server.
+      const embedded = window.__DEMO_DATA__;
+      const [table, taxonomy, meta] = embedded
+        ? [embedded.table, embedded.taxonomy, embedded.metadata]
+        : await Promise.all([
+            fetch('./demo/feature-table.tsv').then((r) => r.text()),
+            fetch('./demo/taxonomy.tsv').then((r) => r.text()),
+            fetch('./demo/metadata.tsv').then((r) => r.text()),
+          ]);
       setKind('asv');
       setTableText(table);
       setTaxonomyText(taxonomy);
@@ -126,19 +145,21 @@ export default function App() {
             required
             loaded={Boolean(tableText)}
             onLoad={setTableText}
+            onError={setError}
           />
           {kind === 'asv' && (
             <FileInput
               label="Taxonomy (optional)"
               loaded={Boolean(taxonomyText)}
               onLoad={setTaxonomyText}
+              onError={setError}
             />
           )}
           <FileInput
-            label="Metadata"
-            required
+            label="Metadata (optional)"
             loaded={Boolean(metadataText)}
             onLoad={setMetadataText}
+            onError={setError}
           />
         </div>
 
@@ -187,6 +208,7 @@ export default function App() {
           </nav>
 
           <main>
+            {tab === 'Overview' && <OverviewPanel dataset={dataset} />}
             {tab === 'Composition' && <CompositionPanel dataset={dataset} />}
             {tab === 'Alpha diversity' && <AlphaPanel dataset={dataset} />}
             {tab === 'Beta diversity' && <BetaPanel dataset={dataset} />}
@@ -203,10 +225,19 @@ interface FileInputProps {
   required?: boolean;
   loaded: boolean;
   onLoad: (text: string) => void;
+  onError: (message: string) => void;
 }
 
-function FileInput({ label, required, loaded, onLoad }: FileInputProps) {
+function FileInput({
+  label,
+  required,
+  loaded,
+  onLoad,
+  onError,
+}: FileInputProps) {
   const [name, setName] = useState<string>();
+  const [note, setNote] = useState<string>();
+  const [busy, setBusy] = useState(false);
 
   return (
     <label className="file-input">
@@ -216,15 +247,45 @@ function FileInput({ label, required, loaded, onLoad }: FileInputProps) {
       </span>
       <input
         type="file"
-        accept=".tsv,.csv,.txt"
+        accept=".tsv,.csv,.txt,.xlsx"
         onChange={async (event) => {
           const file = event.target.files?.[0];
           if (!file) return;
           setName(file.name);
-          onLoad(await file.text());
+          setNote(undefined);
+          setBusy(true);
+
+          try {
+            // Detect Excel by content rather than by file extension: a
+            // spreadsheet renamed to .txt is still a spreadsheet, and reading
+            // its bytes as text produces meaningless output.
+            const buffer = await file.arrayBuffer();
+
+            if (looksLikeXlsx(buffer)) {
+              const { sheets } = await readXlsx(buffer);
+              const sheet = sheets[0];
+              onLoad(await xlsxToTsv(buffer));
+              setNote(
+                sheets.length > 1
+                  ? `Excel: read sheet “${sheet.name}” (of ${sheets.length}; the first is used)`
+                  : `Excel: read sheet “${sheet.name}”`,
+              );
+            } else {
+              onLoad(new TextDecoder().decode(buffer));
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            onError(`${file.name}: ${message}`);
+            setNote(undefined);
+          } finally {
+            setBusy(false);
+          }
         }}
       />
-      {loaded && name && <small className="ok">{name}</small>}
+      {busy && <small>reading…</small>}
+      {!busy && loaded && name && <small className="ok">{name}</small>}
+      {!busy && note && <small>{note}</small>}
     </label>
   );
 }

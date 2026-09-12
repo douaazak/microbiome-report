@@ -2,6 +2,10 @@ export {
   clrTransformSample,
   clrTransformTable,
   DEFAULT_ZERO_REPLACEMENT,
+  defaultZeroReplacement,
+  imputedFractions,
+  MAX_IMPUTED_FRACTION,
+  relativeDetectionLimit,
   type ZeroReplacement,
 } from './clr.js';
 
@@ -50,6 +54,8 @@ export {
   joinTableAndMetadata,
   parseFeatureTable,
   parseMetadata,
+  splitDelimited,
+  thinLabels,
   transpose,
   type FeatureTable,
   type JoinResult,
@@ -60,6 +66,28 @@ export {
   type TableParseOptions,
   type TableParseResult,
 } from './table.js';
+
+export {
+  parseTaxonomyFile,
+  type TaxonomyFileFormat,
+  type TaxonomyFileResult,
+} from './taxonomyFile.js';
+
+export {
+  describeCoverage,
+  taxonomyCoverage,
+  type RankCoverage,
+  type TaxonomyCoverage,
+} from './coverage.js';
+
+export {
+  isDateFormatCode,
+  looksLikeXlsx,
+  readXlsx,
+  xlsxToTsv,
+  type XlsxSheet,
+  type XlsxWorkbook,
+} from './xlsx.js';
 
 export {
   looksLikeRelativeAbundance,

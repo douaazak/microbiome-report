@@ -21,6 +21,23 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/**
+ * The chart's own SVG, from whatever `Plot.plot()` returned.
+ *
+ * With no legend or title Plot returns the SVG itself. With either it returns
+ * a `<figure>` whose legend comes BEFORE the chart — and a swatch legend is
+ * made of one tiny `<svg>` per colour. `figure.querySelector('svg')` therefore
+ * found a 15×15 swatch, and "Download SVG" on every plot with a legend saved
+ * a coloured square. Only a direct child of the figure is the chart.
+ */
+export function plotSvg(figure: Element): SVGSVGElement | null {
+  if (figure instanceof SVGSVGElement) return figure;
+  for (const child of figure.children) {
+    if (child instanceof SVGSVGElement) return child;
+  }
+  return null;
+}
+
 export function downloadSvg(element: SVGElement | null, filename: string): void {
   if (!element) return;
 

@@ -1,12 +1,24 @@
+# Dependencies and build output
 node_modules/
 dist/
 *.tsbuildinfo
 
+# Editor and OS files
 .DS_Store
 .vscode/
 .idea/
 
+# Logs and local environment
 *.log
 npm-debug.log*
 .env
 .env.*
+
+# Validation datasets. These are other people's published data, tens of
+# megabytes each, and are fetched per the README in each validation/ folder.
+# The scripts, READMEs and FINDINGS stay tracked; the data does not.
+validation/**/*.csv
+validation/**/*.tsv
+validation/**/*.xlsx
+validation/**/converted*/
+validation/**/globalpatterns/

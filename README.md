@@ -8,12 +8,15 @@ MicrobiomeAnalyst, Nephele, Namco and MiCloud are all servers you upload to. Tha
 
 | | |
 |---|---|
-| [`microbiome-core`](./microbiome-core) | Parsers and compositional statistics. Pure TypeScript, no DOM, **zero runtime dependencies**, 105 tests. |
-| [`microbiome-app`](./microbiome-app) | React interface. Vite, Observable Plot, static build. |
+| [`microbiome-core`](./microbiome-core) | Parsers and compositional statistics. Pure TypeScript, no DOM, **zero runtime dependencies**. |
+| [`microbiome-app`](./microbiome-app) | React interface. Vite, Observable Plot, static build — also buildable as a single self-contained HTML file. |
+| [`validation`](./validation) | Checks against published datasets, with findings recorded. |
 
 The core is separate so the statistics can be tested and versioned independently of the interface — and so it is usable on its own.
 
 ## Quick start
+
+Requires Node 22 or newer.
 
 ```bash
 cd microbiome-core && npm install && npm test
@@ -22,13 +25,22 @@ cd ../microbiome-app && npm install && npm run dev
 
 Open the URL Vite prints, then click **Load demo data**.
 
+To produce a single HTML file that opens by double-clicking — no server, no install, nothing uploaded:
+
+```bash
+cd microbiome-app && npm run build:standalone
+```
+
+The result is `microbiome-app/dist/microbiome-report-standalone.html`.
+
 ## Status
 
-- ✅ Parsers: QIIME2 export, DADA2 seqtab, generic TSV/CSV, MetaPhlAn v3/v4
-- ✅ Taxonomy normalisation with diagnostics
+- ✅ Parsers: QIIME2 export, DADA2 seqtab, generic TSV/CSV, MetaPhlAn v3/v4, Excel `.xlsx`
+- ✅ Taxonomy in lineage-string or one-column-per-rank form, normalised with diagnostics
 - ✅ Alpha diversity, beta diversity, PCoA, PERMANOVA
 - ✅ Differential abundance (CLR + Wilcoxon/Kruskal-Wallis + BH)
 - ✅ SVG and TSV export on every plot
+- ✅ Validated against two published datasets — see [`validation/`](./validation)
 - ⬜ MaAsLin 3 via WebR, for covariates and repeated measures
 - ⬜ Container with DADA2, for raw FASTQ processing
 

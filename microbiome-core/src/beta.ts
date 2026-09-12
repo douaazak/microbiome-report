@@ -6,7 +6,11 @@
  * unbounded (Aitchison), and all are symmetric with a zero diagonal.
  */
 
-import { clrTransformTable, type ZeroReplacement } from './clr.js';
+import {
+  clrTransformTable,
+  defaultZeroReplacement,
+  type ZeroReplacement,
+} from './clr.js';
 
 export const BETA_METRICS = ['braycurtis', 'jaccard', 'aitchison'] as const;
 export type BetaMetric = (typeof BETA_METRICS)[number];
@@ -89,7 +93,10 @@ export function betaDiversity(
   // happens once up front rather than per pair.
   const source =
     metric === 'aitchison'
-      ? clrTransformTable(table, options.zeroReplacement)
+      ? clrTransformTable(
+          table,
+          options.zeroReplacement ?? defaultZeroReplacement(table),
+        )
       : table;
 
   const samples: number[][] = Array.from({ length: n }, (_, j) =>

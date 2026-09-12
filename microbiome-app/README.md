@@ -17,8 +17,8 @@ Open the URL Vite prints, then click **Load demo data**.
 
 | | |
 |---|---|
-| **Inputs** | QIIME2 feature-table export, DADA2 seqtab, generic TSV/CSV, MetaPhlAn (v3/v4, single or merged) |
-| **Taxonomy** | QIIME2 `taxonomy.tsv`, or MetaPhlAn clade names |
+| **Inputs** | QIIME2 feature-table export, DADA2 seqtab, generic TSV/CSV, Excel `.xlsx`, MetaPhlAn (v3/v4, single or merged) |
+| **Taxonomy** | QIIME2 `taxonomy.tsv`, one-column-per-rank files (mothur, DADA2, phyloseq, TaxAss), lineages embedded in feature IDs, or MetaPhlAn clade names |
 | **Composition** | Stacked bars at any rank, top-N with the remainder pooled, facetable by metadata |
 | **Alpha** | Observed, Shannon, Simpson, Inverse Simpson, Pielou, Chao1 — with Wilcoxon or Kruskal-Wallis |
 | **Beta** | Bray-Curtis, Jaccard, Aitchison; PCoA; PERMANOVA with 999 permutations |
@@ -54,7 +54,7 @@ Regenerate with `node scripts/make-demo.mjs`.
 ## Architecture
 
 ```
-microbiome-core/   pure TypeScript, no DOM, zero dependencies, 105 tests
+microbiome-core/   pure TypeScript, no DOM, zero dependencies
 microbiome-app/    this React app
 ```
 
@@ -63,9 +63,11 @@ The core is a separate package so the statistics can be tested and versioned ind
 ## Tests
 
 ```bash
-npm test                      # integration, against the demo data
-cd ../microbiome-core && npm test   # 105 unit tests
+npm test                            # app tests, against the demo data
+cd ../microbiome-core && npm test   # unit tests for the statistics and parsers
 ```
+
+Two further suites run against published datasets when the data has been fetched into `../validation/`, and skip cleanly otherwise — see the READMEs there.
 
 The integration suite asserts on the biology: that planted taxa dominate the top of the ranking, and — more importantly — that **every genus clearing FDR is one that was actually planted**. A false positive there would mean the method is not controlling error.
 
@@ -79,6 +81,8 @@ Reference values in the core tests are analytic or come from R, with the call in
 ## Deploying
 
 `npm run build` emits a static `dist/`. It uses a relative base, so it works from any subpath — GitHub Pages included. No backend, no environment variables.
+
+`npm run build:standalone` additionally writes `dist/microbiome-report-standalone.html`: one self-contained file with the JS, CSS and demo data inlined, which opens by double-clicking and can be emailed or put on a shared drive.
 
 ## Licence
 

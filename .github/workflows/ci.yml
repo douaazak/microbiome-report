@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    name: microbiome-core
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microbiome-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: microbiome-core/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  app:
+    name: microbiome-app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microbiome-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: microbiome-app/package-lock.json
+      # The app resolves microbiome-core from source, so it needs no install
+      # there — but vitest runs the core through the same alias.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

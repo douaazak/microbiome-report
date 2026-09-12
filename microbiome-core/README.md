@@ -6,10 +6,18 @@ This is the statistical core of a client-side microbiome analysis tool. It is de
 
 ## What it does
 
+- **File reading**: feature tables (QIIME2 export, DADA2 seqtab, generic TSV/CSV), MetaPhlAn, taxonomy in either lineage-string or one-column-per-rank form, and **`.xlsx` spreadsheets**
 - **CLR transform** with explicit, configurable zero replacement
 - **Wilcoxon rank-sum** and **Kruskal–Wallis**, both with tie correction
 - **Benjamini–Hochberg** FDR control, matching R's `p.adjust(method = "BH")`
 - **Differential abundance**: CLR → non-parametric test per feature → BH across features
+- **Alpha and beta diversity**, PCoA, PERMANOVA
+
+### Reading Excel
+
+`readXlsx()` and `xlsxToTsv()` parse `.xlsx` with no dependencies — an `.xlsx` is a zip of XML, and only the worksheet, shared-string table and style table are needed. Decompression uses the platform's own `DecompressionStream('deflate-raw')`, present in modern browsers and Node 22+.
+
+The style table matters more than it sounds. Excel stores dates as plain numbers, distinguished only by their number format, so guessing from magnitude turns a numeric plate barcode or sample ID into a date. Reading `styles.xml` — including custom format codes, and ignoring date letters inside quoted literals — is the only reliable way to tell them apart.
 
 ## What it deliberately does not do
 
@@ -49,7 +57,7 @@ Each result carries `p`, `q`, `effectSize`, per-group CLR means, and — when a 
 
 ```bash
 npm install
-npm test        # 38 tests
+npm test
 npm run typecheck
 npm run build
 ```
@@ -65,7 +73,7 @@ Every reference value is either analytic or comes from R, with the exact call in
 
 Statistical fixtures use a seeded LCG rather than `Math.random`, because a flaky statistical test is worse than no test.
 
-The next step is a fuller validation suite that runs `vegan` in CI and asserts agreement on a fixture dataset.
+Beyond the unit tests, the tool is checked against published datasets in the repository's [`validation/`](../validation) directory, with every discrepancy recorded.
 
 ## Licence
 

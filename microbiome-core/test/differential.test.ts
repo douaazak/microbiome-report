@@ -190,3 +190,82 @@ describe('differentialAbundance', () => {
     }
   });
 });
+
+describe('abundance filtering', () => {
+  /*
+   * Six samples, two groups. `trace` is present everywhere but never above
+   * 0.1% of its sample; `real` is present just as often and abundant. A
+   * prevalence filter alone cannot tell them apart, which is the whole reason
+   * for the abundance threshold.
+   */
+  const table = [
+    [500, 500, 500, 500, 500, 500], // abundant backbone
+    [300, 320, 310, 290, 305, 295], // second backbone
+    [100, 90, 95, 105, 98, 102], // real, ~10%
+    [1, 1, 1, 1, 1, 1], // trace, ~0.1%
+  ];
+  const ids = ['bg1', 'bg2', 'real', 'trace'];
+  const groups = ['ctrl', 'ctrl', 'ctrl', 'trt', 'trt', 'trt'];
+
+  it('counts a feature as detected only when it reaches the threshold', () => {
+    const loose = differentialAbundance(table, ids, groups, {
+      minPrevalence: 0.5,
+      minAbundance: 0,
+    });
+    expect(loose.testedCount).toBe(4);
+
+    // 0.1% is below 1%, so `trace` is detected in no sample at all.
+    const strict = differentialAbundance(table, ids, groups, {
+      minPrevalence: 0.5,
+      minAbundance: 0.01,
+    });
+    expect(strict.testedCount).toBe(3);
+    const trace = strict.results.find((r) => r.featureId === 'trace')!;
+    expect(trace.p).toBeNull();
+    expect(trace.excludedReason).toMatch(/0\.0% of samples/);
+  });
+
+  it('measures abundance relative to each sample, not in raw units', () => {
+    /*
+     * The second sample is sequenced ten times as deeply. A raw threshold
+     * would keep its trace feature and drop the first sample's identical
+     * proportion, inventing a difference out of sequencing depth.
+     */
+    const uneven = [
+      [600, 610, 590, 6000, 6100, 5900],
+      [250, 240, 260, 2500, 2400, 2600],
+      [140, 140, 140, 1400, 1400, 1400],
+      [10, 10, 10, 100, 100, 100], // 1% of its sample, at either depth
+    ];
+    const result = differentialAbundance(
+      uneven,
+      ['bg1', 'bg2', 'bg3', 'minor'],
+      groups,
+      { minPrevalence: 1, minAbundance: 0.005 },
+    );
+    // 1% everywhere, so `minor` clears a 0.5% threshold in every sample —
+    // a raw cutoff would have kept it only in the deep ones.
+    expect(result.testedCount).toBe(4);
+    expect(result.results.find((r) => r.featureId === 'minor')!.p).not.toBeNull();
+  });
+
+  it('says which threshold excluded a feature', () => {
+    const result = differentialAbundance(table, ids, groups, {
+      minPrevalence: 0.5,
+      minAbundance: 0.05,
+    });
+    const trace = result.results.find((r) => r.featureId === 'trace')!;
+    expect(trace.excludedReason).toContain('5.0%');
+  });
+
+  it('warns rather than failing when the filter removes everything', () => {
+    const result = differentialAbundance(table, ids, groups, {
+      minPrevalence: 1,
+      minAbundance: 0.99,
+    });
+    expect(result.testedCount).toBe(0);
+    expect(result.warnings.join(' ')).toMatch(/nothing could be tested/i);
+    // Group means still resolve, so the table is not simply blank.
+    expect(Number.isFinite(result.results[0].groupMeans.ctrl)).toBe(true);
+  });
+});

@@ -3,7 +3,11 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
+    // DOM is included for web-platform globals only — TextDecoder, Blob,
+    // Response, DecompressionStream — which the .xlsx reader uses and which
+    // exist in browsers and in Node 22+ alike. No document or window API is
+    // used anywhere in this package.
+    "lib": ["ES2022", "DOM"],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,

@@ -1,137 +1,195 @@
-import * as Plot from '@observablehq/plot';
 import { useMemo, useState } from 'react';
-import { labelAtRank, RANKS, type Rank } from 'microbiome-core';
+import { RANKS, type Rank } from 'microbiome-core';
 
-import { groupLabels, type Dataset } from '../lib/load';
+import {
+  buildCompositionPlot,
+  type CompositionOrientation,
+  MAX_DISTINCT_TAXA,
+  MAX_VISIBLE_BARS,
+  type CompositionMode,
+} from '../lib/composition';
+import { groupableColumns, type Dataset } from '../lib/load';
+import { Explainer } from './Explainer';
 import { PlotFigure } from './PlotFigure';
 import { NumberField, Select } from './Select';
 
-const OTHER = 'Other';
+/**
+ * Capped at the number of taxa that can still be given distinct colours once
+ * "Other" has taken one slot. Above roughly a dozen stacked colours a
+ * composition bar stops being readable anyway, so this is as much a design
+ * choice as a palette limit.
+ */
+const MAX_TOP_N = MAX_DISTINCT_TAXA;
 
 export function CompositionPanel({ dataset }: { dataset: Dataset }) {
-  const categorical = dataset.metadata.columns.filter(
-    (c) => c.type === 'categorical',
+  // Only columns that can actually define groups: constant columns and
+  // columns unique per sample are excluded, with the reason reported.
+  const { usable: categorical } = groupableColumns(
+    dataset.metadata,
+    dataset.table.sampleIds.length,
   );
 
-  const [rank, setRank] = useState<Rank>('genus');
+  /*
+   * Start at the deepest rank that is mostly assigned, not always at genus.
+   *
+   * Environmental datasets often assign genus for a small minority of features
+   * — 14% in the freshwater dataset this was tested against — so defaulting to
+   * genus produces a chart made almost entirely of "Unclassified …" bars. That
+   * looks like a bug in the tool when it is a property of the data.
+   */
+  const [rank, setRank] = useState<Rank>(
+    () => dataset.coverage?.bestRank ?? 'genus',
+  );
   const [topN, setTopN] = useState(10);
   const [variable, setVariable] = useState(categorical[0]?.name ?? '');
 
-  const rows = useMemo(() => {
-    const { table, lineages } = dataset;
+  // Default to group means when there are more samples than can be drawn
+  // individually, so the first view is one that can actually be read.
+  const [orientation, setOrientation] = useState<'auto' | CompositionOrientation>('auto');
+  const [mode, setMode] = useState<CompositionMode>(() =>
+    dataset.table.sampleIds.length > MAX_VISIBLE_BARS && categorical.length > 0
+      ? 'groupMeans'
+      : 'samples',
+  );
 
-    // Collapse features to their label at the chosen rank. Without taxonomy
-    // the feature IDs are used directly, so the panel still works.
-    const labels = table.featureIds.map((id, i) =>
-      lineages ? labelAtRank(lineages[i], rank) : id,
-    );
+  const rankCoverage = dataset.coverage?.byRank.find((c) => c.rank === rank);
 
-    const perSample = table.sampleIds.map((_, j) => {
-      const totals = new Map<string, number>();
-      for (let i = 0; i < labels.length; i++) {
-        totals.set(labels[i], (totals.get(labels[i]) ?? 0) + table.values[i][j]);
-      }
-      const sum = [...totals.values()].reduce((a, b) => a + b, 0);
-      return { totals, sum };
-    });
-
-    // Rank taxa by their mean relative abundance across samples, so a taxon
-    // that dominates one sample does not crowd out one that is consistently
-    // present everywhere.
-    const meanAbundance = new Map<string, number>();
-    for (const { totals, sum } of perSample) {
-      for (const [label, value] of totals) {
-        const relative = sum > 0 ? value / sum : 0;
-        meanAbundance.set(
-          label,
-          (meanAbundance.get(label) ?? 0) + relative / perSample.length,
-        );
-      }
-    }
-
-    const top = [...meanAbundance.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, topN)
-      .map(([label]) => label);
-    const topSet = new Set(top);
-
-    const groups = variable ? groupLabels(dataset.metadata, variable) : [];
-
-    return table.sampleIds.flatMap((sampleId, j) => {
-      const { totals, sum } = perSample[j];
-      const collapsed = new Map<string, number>();
-
-      for (const [label, value] of totals) {
-        const key = topSet.has(label) ? label : OTHER;
-        collapsed.set(key, (collapsed.get(key) ?? 0) + value);
-      }
-
-      return [...collapsed.entries()].map(([taxon, value]) => ({
-        sampleId,
-        taxon,
-        abundance: sum > 0 ? value / sum : 0,
-        group: variable ? (groups[j] ?? 'n/a') : '',
-      }));
-    });
-  }, [dataset, rank, topN, variable]);
-
-  const options = useMemo<Plot.PlotOptions>(() => {
-    // Keep "Other" last in the stack and in the legend, where it reads as a
-    // remainder rather than as a taxon.
-    const order = [
-      ...new Set(rows.filter((r) => r.taxon !== OTHER).map((r) => r.taxon)),
-    ].sort();
-
-    return {
-      height: 460,
-      marginBottom: 90,
-      marginLeft: 60,
-      x: { label: 'Sample', tickRotate: -60 },
-      y: { label: 'Relative abundance', percent: true, grid: true },
-      color: { legend: true, domain: [...order, OTHER], label: rank },
-      marks: [
-        Plot.barY(rows, {
-          x: 'sampleId',
-          y: 'abundance',
-          fill: 'taxon',
-          order: [...order, OTHER],
-          tip: true,
-          fx: variable ? 'group' : undefined,
-        }),
-      ],
-      fx: variable ? { label: variable } : undefined,
-    };
-  }, [rows, rank, variable]);
+  const plot = useMemo(
+    () =>
+      buildCompositionPlot(dataset, {
+        rank,
+        topN: Math.min(Math.max(topN, 2), MAX_TOP_N),
+        variable,
+        mode: variable ? mode : 'samples',
+        orientation: orientation === 'auto' ? undefined : orientation,
+      }),
+    [dataset, rank, topN, variable, mode, orientation],
+  );
 
   return (
     <section>
+      <Explainer question="What is each sample made of?">
+        <p>
+          Each bar is one sample, and each colour a taxon. Bar heights are
+          normalised so every sample sums to 100%, which makes samples
+          comparable even though they were sequenced to different depths.
+        </p>
+        <p>
+          <strong>This tab is descriptive — there are no statistics here.</strong>{' '}
+          Use it to see the broad picture and spot obvious outliers, then use
+          the Differential tab to ask whether any specific taxon really differs.
+        </p>
+        <p className="watch-out">
+          <strong>Watch out:</strong> because everything is a percentage, taxa
+          are not independent. If one taxon genuinely increases, every other
+          taxon's share must fall to keep the total at 100% — even when nothing
+          happened to them biologically. Never read a drop in one bar as
+          evidence that taxon declined.
+        </p>
+      </Explainer>
+
       <div className="controls">
         <Select
           label="Rank"
           value={rank}
           onChange={(v) => setRank(v as Rank)}
-          options={RANKS.map((r) => ({ value: r, label: r }))}
+          // Coverage in the label, so a rank that will mostly say
+          // "Unclassified" is visible before it is chosen.
+          options={RANKS.map((r) => {
+            const c = dataset.coverage?.byRank.find((x) => x.rank === r);
+            return {
+              value: r,
+              label: c ? `${r} — ${(c.fraction * 100).toFixed(0)}% assigned` : r,
+            };
+          })}
         />
         <NumberField
           label="Show top"
           value={topN}
           onChange={setTopN}
           min={2}
-          max={30}
-          hint="Remaining taxa are pooled as “Other”."
+          max={MAX_TOP_N}
+          hint={`Up to ${MAX_TOP_N}; the rest are pooled as “Other”.`}
         />
         {categorical.length > 0 && (
           <Select
-            label="Facet by"
+            label="Group by"
             value={variable}
             onChange={setVariable}
             options={[
-              { value: '', label: 'None' },
+              { value: '', label: 'None (sample ID order)' },
               ...categorical.map((c) => ({ value: c.name, label: c.name })),
             ]}
           />
         )}
+        {variable && (
+          <Select
+            label="Show"
+            value={mode}
+            onChange={(v) => setMode(v as CompositionMode)}
+            options={[
+              { value: 'groupMeans', label: `Mean per ${variable}` },
+              { value: 'samples', label: 'Each sample' },
+            ]}
+          />
+        )}
+        {plot.mode === 'samples' && (
+          <Select
+            label="Bars"
+            value={orientation}
+            onChange={(v) =>
+              setOrientation(v as 'auto' | CompositionOrientation)
+            }
+            options={[
+              { value: 'auto', label: 'Auto' },
+              { value: 'horizontal', label: 'Horizontal (one row per sample)' },
+              { value: 'vertical', label: 'Vertical (one column per sample)' },
+            ]}
+          />
+        )}
       </div>
+
+      {plot.tooManySamples && (
+        <div className="notice warn">
+          <strong>
+            {plot.tooManySamples.total.toLocaleString()} samples is more than
+            this chart can show individually.
+          </strong>
+          <p>
+            Each bar would be under two pixels wide — the plot would draw, but
+            nothing in it could be read or hovered. Roughly{' '}
+            {plot.tooManySamples.limit} is the practical limit.
+          </p>
+          {categorical.length > 0 ? (
+            <p>
+              Switch “Show” to <em>Mean per {variable || 'group'}</em> for one
+              bar per group, or filter to fewer samples upstream.
+            </p>
+          ) : (
+            <p>
+              With a metadata file you could average by group instead. Otherwise
+              filter to fewer samples upstream.
+            </p>
+          )}
+        </div>
+      )}
+
+      {rankCoverage && rankCoverage.fraction < 0.5 && (
+        <div className="notice warn">
+          <strong>
+            Only {(rankCoverage.fraction * 100).toFixed(0)}% of features have a{' '}
+            {rank} assignment.
+          </strong>
+          <p>
+            The rest are grouped as “Unclassified …” by their nearest assigned
+            ancestor, so most of this chart reflects what the reference database
+            could not resolve rather than what is in the samples.
+            {dataset.coverage &&
+              dataset.coverage.bestRank !== rank &&
+              ` ${dataset.coverage.bestRank} is the deepest rank that is mostly assigned.`}
+          </p>
+        </div>
+      )}
 
       {!dataset.lineages && (
         <div className="notice">
@@ -141,9 +199,11 @@ export function CompositionPanel({ dataset }: { dataset: Dataset }) {
       )}
 
       <PlotFigure
-        options={options}
+        options={plot.options}
         exportName={`composition-${rank}-top${topN}`}
-        exportRows={rows}
+        exportRows={plot.rows}
+        caption={plot.caption}
+        scroll={plot.scrolls}
       />
     </section>
   );
