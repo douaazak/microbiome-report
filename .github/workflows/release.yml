@@ -1,0 +1,54 @@
+name: Release
+
+# Builds the single-file app and attaches it to a GitHub release, so the
+# download link in the README always points at the current version and nobody
+# has to install Node to use the tool.
+#
+# Trigger with a tag:  git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  standalone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: microbiome-app/package-lock.json
+
+      - name: Install
+        working-directory: microbiome-app
+        run: npm ci
+
+      # The tests gate the release. A broken build that still produces a file
+      # is worse than no release, because the file looks fine until someone
+      # trusts a number that came out of it.
+      - name: Test
+        working-directory: microbiome-app
+        run: npm test
+
+      - name: Build single-file app
+        working-directory: microbiome-app
+        run: npm run build:standalone
+
+      - name: Name it for humans
+        run: cp microbiome-app/dist/microbiome-report-standalone.html microbiome-report.html
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" microbiome-report.html \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            || gh release upload "${GITHUB_REF_NAME}" microbiome-report.html --clobber
