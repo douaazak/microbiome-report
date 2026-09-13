@@ -6,9 +6,11 @@ MicrobiomeAnalyst, Nephele, Namco and MiCloud are all servers you upload to. Tha
 
 ## Get started
 
-**[⬇ Download microbiome-report.html](https://github.com/douaazak/microbiome-report/releases/latest/download/microbiome-report.html)** — then double-click it.
+**[⬇ microbiome-report.html](https://github.com/douaazak/microbiome-report/raw/main/microbiome-report.html)** — save it, then double-click it.
 
 That is the whole installation. One file, opened by your normal browser. No Node, no terminal, no account, no server. The file contains the entire application, so it keeps working offline, on a locked-down institutional laptop, and in five years when this repository has moved on.
+
+If your browser shows the page source instead of downloading, right-click the link and choose *Save link as*. The file also sits at the top level of the repository, so downloading the repo as a ZIP gets you a copy too, and every tagged [release](https://github.com/douaazak/microbiome-report/releases) carries one.
 
 Click **Load demo data** to try it before supplying anything of your own.
 
