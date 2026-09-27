@@ -40,8 +40,21 @@ export function observed(counts: number[]): number {
   return counts.filter((x) => x > 0).length;
 }
 
+/**
+ * True when a sample holds nothing at all — a blank, a negative control, or a
+ * library emptied by upstream filtering.
+ *
+ * Diversity is undefined for such a sample, not zero and certainly not
+ * maximal. Every metric here returns NaN for it so that it is excluded from
+ * plots and tests rather than ranked against real samples.
+ */
+function isEmpty(counts: number[]): boolean {
+  return counts.reduce((a, b) => a + b, 0) <= 0;
+}
+
 /** Shannon entropy, natural log — the convention vegan uses by default. */
 export function shannon(counts: number[]): number {
+  if (isEmpty(counts)) return NaN;
   const p = proportions(counts);
   let h = 0;
   for (const value of p) {
@@ -50,8 +63,17 @@ export function shannon(counts: number[]): number {
   return h;
 }
 
-/** Gini-Simpson index: 1 - sum(p^2). */
+/**
+ * Gini-Simpson index: 1 - sum(p^2).
+ *
+ * The empty-sample guard is not cosmetic. `proportions` returns all zeros
+ * when the total is zero, so the sum was 0 and this returned 1 — the maximum.
+ * A blank well then plotted as the single most diverse sample in the study,
+ * above every real one, while `inverseSimpson` and `pielou` returned NaN for
+ * the same input.
+ */
 export function simpson(counts: number[]): number {
+  if (isEmpty(counts)) return NaN;
   const p = proportions(counts);
   let sum = 0;
   for (const value of p) sum += value * value;
@@ -170,12 +192,30 @@ export function alphaDiversity(
 
   const depths = samples.map((s) => s.reduce((a, b) => a + b, 0));
   if (isCounts && depths.length > 1) {
-    const min = Math.min(...depths);
-    const max = Math.max(...depths);
-    if (min > 0 && max / min > 10) {
+    /*
+     * Empty samples are reported first and separately.
+     *
+     * The fold-change warning below is guarded on `min > 0` to avoid dividing
+     * by zero — which meant that a table containing an empty sample, the case
+     * most worth warning about, produced no warning at all, not even about
+     * the other samples. Excluding empties from the ratio restores that.
+     */
+    const empty = depths.filter((d) => d <= 0).length;
+    if (empty > 0) {
       warnings.push(
-        `Sequencing depth varies ${(max / min).toFixed(0)}-fold across samples (${min.toLocaleString()} to ${max.toLocaleString()}). Richness metrics are sensitive to depth; consider rarefying or using depth as a covariate.`,
+        `${empty} sample${empty === 1 ? ' has' : 's have'} no reads at all. Diversity is undefined for ${empty === 1 ? 'it' : 'them'}, so ${empty === 1 ? 'it is' : 'they are'} reported as blank rather than as zero diversity.`,
       );
+    }
+
+    const nonEmpty = depths.filter((d) => d > 0);
+    if (nonEmpty.length > 1) {
+      const min = Math.min(...nonEmpty);
+      const max = Math.max(...nonEmpty);
+      if (max / min > 10) {
+        warnings.push(
+          `Sequencing depth varies ${(max / min).toFixed(0)}-fold across samples (${min.toLocaleString()} to ${max.toLocaleString()}). Richness metrics are sensitive to depth; consider rarefying or using depth as a covariate.`,
+        );
+      }
     }
   }
 

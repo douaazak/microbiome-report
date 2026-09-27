@@ -349,6 +349,21 @@ export function permanova(
 
   const observedF = pseudoF(squared, groupLabels, groups);
 
+  /*
+   * Refuse rather than return a number nobody should read.
+   *
+   * A NaN pseudo-F means the design carries no within-group information at
+   * all — most often every group has exactly one member, which happens when
+   * the user picks sample ID, subject ID or a continuous column as the
+   * factor. There is no test to run, and the alternative is reporting
+   * p = 0.001 with R² = 1.0 for a model that means nothing.
+   */
+  if (Number.isNaN(observedF)) {
+    throw new Error(
+      `PERMANOVA cannot be computed: no group has more than one sample, so there is no within-group variation to test against. Choose a grouping variable with several samples per group.`,
+    );
+  }
+
   const rng = makeRng(seed);
   const shuffled = [...groupLabels];
   let atLeastAsExtreme = 0;
@@ -360,6 +375,10 @@ export function permanova(
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
     const permutedF = pseudoF(squared, shuffled, groups);
+    // A NaN permutation cannot be counted either way; counting it as "not
+    // extreme" by falling through a failed comparison is how a broken null
+    // distribution turns into a significant p-value.
+    if (Number.isNaN(permutedF)) continue;
     if (permutedF >= observedF) atLeastAsExtreme++;
   }
 
@@ -417,7 +436,22 @@ function pseudoF(
   const { ssTotal, ssWithin } = sumsOfSquares(squared, labels, groups);
   const ssBetween = ssTotal - ssWithin;
 
+  /*
+   * `!(denominator > 0)` rather than `denominator <= 0`, because NaN fails
+   * every comparison.
+   *
+   * With one sample per group, ssWithin and (n - a) are both 0, so the
+   * denominator is NaN. `NaN <= 0` is false, so the old guard did not fire
+   * and pseudoF returned NaN — and since `permutedF >= observedF` is also
+   * false for every permutation when observedF is NaN, nothing was ever
+   * counted as extreme and the p-value collapsed to its floor. Grouping by
+   * sample ID, subject ID or a continuous column reported pseudo-F = NaN,
+   * R² = 1.0 and p = 0.001.
+   */
   const denominator = ssWithin / (n - a);
-  if (denominator <= 0) return Infinity;
+  if (!Number.isFinite(denominator)) return NaN;
+  // Zero within-group distance with more than one sample per group is a real
+  // result — every group internally identical — and separates perfectly.
+  if (denominator === 0) return ssBetween > 0 ? Infinity : NaN;
   return ssBetween / (a - 1) / denominator;
 }

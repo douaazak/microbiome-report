@@ -40,7 +40,17 @@ const PREFIX_TO_INDEX: Record<string, number> = {
   s: 6,
 };
 
-/** Values that mean "nothing was assigned here", normalised to null. */
+/**
+ * Values that mean "nothing was assigned here", normalised to null.
+ *
+ * The `uncultured` family of tokens matters more than it looks. SILVA assigns
+ * `g__uncultured` to a large share of ASVs, across families that are not
+ * related to each other. Read as a name, they collapse into a single genus
+ * called "uncultured" that then shows up as one of the largest bars in a
+ * composition plot and as one feature in differential abundance. Read as
+ * null, `labelAtRank` renders them as "Unclassified <family>", which keeps
+ * genuinely different lineages apart and says plainly what is known.
+ */
 export const DEFAULT_NULL_TOKENS = [
   'na',
   'n/a',
@@ -49,6 +59,20 @@ export const DEFAULT_NULL_TOKENS = [
   'unknown',
   'none',
   '',
+  // SILVA / NCBI placeholders.
+  'uncultured',
+  'uncultured bacterium',
+  'uncultured_bacterium',
+  'uncultured archaeon',
+  'uncultured_archaeon',
+  'uncultured organism',
+  'uncultured_organism',
+  'uncultured soil bacterium',
+  'uncultured_soil_bacterium',
+  'unidentified',
+  'ambiguous_taxa',
+  'ambiguous taxa',
+  'metagenome',
 ];
 
 export interface LineageOptions {
@@ -67,6 +91,12 @@ export interface ParsedLineage {
   raw: string;
   /** True when the lineage carried no rank prefixes and was read positionally. */
   positional: boolean;
+  /**
+   * How many tokens in an otherwise-prefixed lineage had no prefix of their
+   * own and were placed at the rank their neighbours bracket them into.
+   * Always 0 for a fully prefixed or fully positional lineage.
+   */
+  inferredUnprefixed: number;
 }
 
 export interface LineageDiagnostics {
@@ -83,6 +113,12 @@ export interface LineageDiagnostics {
   rowsWithGaps: number;
   /** Rows read positionally because they carried no prefixes. */
   positionalRows: number;
+  /**
+   * Rows where a token inside an otherwise-prefixed lineage had no prefix and
+   * was placed from its position. Worth surfacing: the placement is inferred,
+   * not stated by the file.
+   */
+  inferredUnprefixedRows: number;
   /** MetaPhlAn `t__` strain tokens, which have no slot in the 7-rank model. */
   strainTokensDropped: number;
   /** Count of rows by how many ranks were populated. */
@@ -104,6 +140,18 @@ function detectDelimiter(raw: string): string {
   return best;
 }
 
+/**
+ * Strip an inline bootstrap confidence value, as mothur writes it:
+ * `Firmicutes(100)`, `c__[Spartobacteria](99)`.
+ *
+ * Left in place, the confidence becomes part of the name, so the same phylum
+ * at 100% and at 98% are two different taxa. One phylum then fragments into a
+ * dozen composition bars and a dozen separately-tested features.
+ */
+function stripConfidence(value: string): string {
+  return value.replace(/\(\s*\d+(?:\.\d+)?\s*\)\s*$/, '').trim();
+}
+
 /** Parse one lineage string into a fixed-length rank array. */
 export function parseLineage(
   raw: string,
@@ -118,42 +166,70 @@ export function parseLineage(
 
   const ranks: (string | null)[] = new Array(RANKS.length).fill(null);
   let sawPrefix = false;
-  const unprefixed: string[] = [];
+  let inferredUnprefixed = 0;
 
+  /*
+   * Walk the tokens once, tracking the rank slot the next token would occupy.
+   *
+   * A prefixed token is placed at the rank its prefix names and sets the
+   * cursor to the slot after it. An unprefixed token takes the cursor's slot.
+   * That single rule covers both shapes: a lineage with no prefixes anywhere
+   * is read positionally from domain downward (the cursor starts at 0 and
+   * only ever advances by one), and a lineage where one token lost its prefix
+   * — `d__Bacteria;p__Firmicutes;Clostridia;o__Clostridiales` — puts that
+   * token in the slot its neighbours bracket it into.
+   *
+   * The previous version collected unprefixed tokens and then used them only
+   * when the lineage had no prefixes at all, so in a mixed lineage they were
+   * dropped: the class above went missing, and the row was then counted as a
+   * legitimate gap, which hid the loss behind a diagnostic.
+   *
+   * An unprefixed token never overwrites a slot a prefix already claimed, so
+   * this cannot shift a lower rank upward over an explicit assignment.
+   */
+  let cursor = 0;
   for (const token of tokens) {
-    const trimmed = token.trim();
+    const trimmed = stripConfidence(token.trim());
     const match = /^([a-zA-Z])__(.*)$/.exec(trimmed);
 
     if (match) {
-      sawPrefix = true;
       const letter = match[1].toLowerCase();
-      const value = match[2].trim();
+      const value = stripConfidence(match[2].trim());
 
       const index = PREFIX_TO_INDEX[letter];
       // Unrecognised prefixes (notably MetaPhlAn's t__ strain level) have no
       // slot in a 7-rank model and are counted rather than forced somewhere.
+      // They do not move the cursor either.
       if (index === undefined) continue;
 
+      sawPrefix = true;
       ranks[index] = nullTokens.has(value.toLowerCase()) ? null : value;
+      cursor = index + 1;
     } else {
-      unprefixed.push(trimmed);
+      if (cursor >= RANKS.length) continue;
+      if (ranks[cursor] === null) {
+        ranks[cursor] = nullTokens.has(trimmed.toLowerCase()) ? null : trimmed;
+        if (ranks[cursor] !== null) inferredUnprefixed++;
+      }
+      cursor++;
     }
   }
 
   if (!sawPrefix) {
     if (options.allowPositional === false) {
-      return { ranks, raw, positional: true };
+      return {
+        ranks: new Array(RANKS.length).fill(null),
+        raw,
+        positional: true,
+        inferredUnprefixed: 0,
+      };
     }
-    // No prefixes anywhere: fall back to positional assignment, which is the
-    // only interpretation available.
-    for (let i = 0; i < Math.min(unprefixed.length, RANKS.length); i++) {
-      const value = unprefixed[i];
-      ranks[i] = nullTokens.has(value.toLowerCase()) ? null : value;
-    }
-    return { ranks, raw, positional: true };
+    // No prefixes anywhere: the positional reading above is the only
+    // interpretation available, so it is not an inference worth flagging.
+    return { ranks, raw, positional: true, inferredUnprefixed: 0 };
   }
 
-  return { ranks, raw, positional: false };
+  return { ranks, raw, positional: false, inferredUnprefixed };
 }
 
 export interface LineageParseResult {
@@ -172,6 +248,7 @@ export function parseLineages(
     whitespaceTrimmed: 0,
     rowsWithGaps: 0,
     positionalRows: 0,
+    inferredUnprefixedRows: 0,
     strainTokensDropped: 0,
     depthCounts: {},
   };
@@ -195,6 +272,7 @@ export function parseLineages(
 
     const parsed = parseLineage(raw, options);
     if (parsed.positional) diagnostics.positionalRows++;
+    if (parsed.inferredUnprefixed > 0) diagnostics.inferredUnprefixedRows++;
 
     const depth = parsed.ranks.filter((r) => r !== null).length;
     diagnostics.depthCounts[depth] = (diagnostics.depthCounts[depth] ?? 0) + 1;
@@ -263,6 +341,12 @@ export function describeLineageDiagnostics(d: LineageDiagnostics): string[] {
   if (d.positionalRows > 0 && d.positionalRows < d.total) {
     messages.push(
       `${d.positionalRows} of ${d.total} lineages carried no rank prefixes and were read positionally. Verify these are correct.`,
+    );
+  }
+
+  if (d.inferredUnprefixedRows > 0) {
+    messages.push(
+      `${d.inferredUnprefixedRows} lineage${d.inferredUnprefixedRows === 1 ? ' has a token' : 's have tokens'} with no rank prefix. ${d.inferredUnprefixedRows === 1 ? 'It was' : 'They were'} placed at the rank the surrounding prefixes imply.`,
     );
   }
 

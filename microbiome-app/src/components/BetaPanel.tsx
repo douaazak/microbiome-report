@@ -2,8 +2,10 @@ import * as Plot from '@observablehq/plot';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BETA_METRICS, type BetaMetric } from 'microbiome-core';
 
+import { computeBeta } from '../lib/beta.compute';
 import BetaWorker from '../lib/beta.worker?worker&inline';
 import type { BetaProgress, BetaResult } from '../lib/beta.worker';
+import { afterPaint, startWorker } from '../lib/offThread';
 import {
   completeCases,
   groupableColumns,
@@ -53,6 +55,18 @@ export function BetaPanel({ dataset }: { dataset: Dataset }) {
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [requested, setRequested] = useState(0);
+  /**
+   * Set by the Cancel button, cleared by anything that changes what would be
+   * computed.
+   *
+   * Cancel used to call `setRequested(0)`, which below the auto-run limit was
+   * already 0 — so no dependency changed, the effect never re-ran, its
+   * cleanup never fired, and the panel was left with no result, no stage and
+   * no error: an empty tab with no way to restart it.
+   */
+  const [cancelledByUser, setCancelledByUser] = useState(false);
+  /** True when this browser gave us no worker and the page is doing the work. */
+  const [mainThread, setMainThread] = useState(false);
 
   const worker = useRef<Worker | null>(null);
 
@@ -89,18 +103,60 @@ export function BetaPanel({ dataset }: { dataset: Dataset }) {
     setResult(null);
     setError(null);
     setStage(null);
+    // Choosing a different distance or grouping is a new question, so an
+    // earlier cancellation no longer applies.
+    setCancelledByUser(false);
   }, [metric, variable, dataset]);
 
   useEffect(() => {
     if (!inputs) return;
     if (needsConsent && requested === 0) return;
+    if (cancelledByUser) return;
 
-    const instance = new BetaWorker();
-    worker.current = instance;
     let cancelled = false;
 
     setStage('Starting…');
     setError(null);
+
+    const request = {
+      values: inputs.values,
+      sampleIds: inputs.sampleIds,
+      groups: inputs.groups,
+      metric,
+      // Fewer permutations on large datasets; the p-value floor rises from
+      // 1/1000 to 1/200, which is ample when n is this large.
+      permutations: n > 500 ? 199 : 999,
+    };
+
+    const instance = startWorker(() => new BetaWorker());
+
+    if (!instance) {
+      /*
+       * No worker available. Without a fallback the entire Beta tab was
+       * unreachable on such a browser — the ordination lives only in the
+       * worker. Running it here blocks the tab, so say so first and let the
+       * message paint before the thread stops responding.
+       */
+      worker.current = null;
+      setMainThread(true);
+      setStage('Computing on the page — the tab will not respond…');
+      const cancelPaint = afterPaint(() => {
+        if (cancelled) return;
+        try {
+          setResult(computeBeta(request));
+        } catch (error) {
+          setError(error instanceof Error ? error.message : String(error));
+        }
+        setStage(null);
+      });
+      return () => {
+        cancelled = true;
+        cancelPaint();
+      };
+    }
+
+    worker.current = instance;
+    setMainThread(false);
 
     instance.onmessage = (event: MessageEvent<BetaProgress>) => {
       if (cancelled) return;
@@ -120,23 +176,24 @@ export function BetaPanel({ dataset }: { dataset: Dataset }) {
       setError(event.message || 'The analysis failed.');
       setStage(null);
     };
+    // Without this, a result that cannot be structured-cloned back leaves the
+    // progress message on screen for ever with no error anywhere.
+    instance.onmessageerror = () => {
+      if (cancelled) return;
+      setError(
+        'The ordination finished but its result could not be read back from the background thread.',
+      );
+      setStage(null);
+    };
 
-    instance.postMessage({
-      values: inputs.values,
-      sampleIds: inputs.sampleIds,
-      groups: inputs.groups,
-      metric,
-      // Fewer permutations on large datasets; the p-value floor rises from
-      // 1/1000 to 1/200, which is ample when n is this large.
-      permutations: n > 500 ? 199 : 999,
-    });
+    instance.postMessage(request);
 
     return () => {
       cancelled = true;
       instance.terminate();
       worker.current = null;
     };
-  }, [inputs, metric, n, needsConsent, requested]);
+  }, [inputs, metric, n, needsConsent, requested, cancelledByUser]);
 
   const options = useMemo<Plot.PlotOptions>(() => {
     const variance = result?.ordination.varianceExplained ?? [];
@@ -311,15 +368,22 @@ export function BetaPanel({ dataset }: { dataset: Dataset }) {
           )}
 
           {stage && (
-            <div className="notice">
+            <div className="notice" role="status" aria-live="polite">
               <span className="spinner" aria-hidden="true" /> {stage}
+              {mainThread && (
+                <p>
+                  This browser would not run the ordination in the background,
+                  so it is running on the page itself. Nothing is lost, but the
+                  tab will not respond until it finishes.
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   worker.current?.terminate();
                   worker.current = null;
                   setStage(null);
-                  setRequested(0);
+                  setCancelledByUser(true);
                 }}
               >
                 Cancel
@@ -327,7 +391,24 @@ export function BetaPanel({ dataset }: { dataset: Dataset }) {
             </div>
           )}
 
-          {error && <div className="notice error">{error}</div>}
+          {cancelledByUser && !stage && !result && (
+            <div className="notice">
+              Cancelled.
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setCancelledByUser(false)}
+              >
+                Run the analysis
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="notice error" role="alert">
+              {error}
+            </div>
+          )}
 
           {result && (
             <>

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { FindingsReport } from '../lib/findings';
+import { buildFindings, type FindingsReport } from '../lib/findings';
 import FindingsWorker from '../lib/findings.worker?worker&inline';
 import type { FindingsProgress } from '../lib/findings.worker';
+import { afterPaint, startWorker } from '../lib/offThread';
 import { summarise } from '../lib/summary';
 import { groupableColumns, type Dataset } from '../lib/load';
 import { Explainer } from './Explainer';
@@ -29,6 +30,8 @@ export function OverviewPanel({ dataset }: { dataset: Dataset }) {
   const [report, setReport] = useState<FindingsReport | null>(null);
   const [computing, setComputing] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  /** True when this browser gave us no worker and the page is doing the work. */
+  const [mainThread, setMainThread] = useState(false);
 
   useEffect(() => {
     setReport(null);
@@ -38,9 +41,43 @@ export function OverviewPanel({ dataset }: { dataset: Dataset }) {
       return;
     }
 
-    const worker = new FindingsWorker();
     let cancelled = false;
     setComputing(true);
+
+    const n = dataset.table.sampleIds.length;
+    // Fewer permutations on large datasets, as the beta tab does; the
+    // p-value floor rises from 1/1000 to 1/200, ample at that n.
+    const options = { permutations: n > 500 ? 199 : 999 };
+
+    const worker = startWorker(() => new FindingsWorker());
+
+    if (!worker) {
+      /*
+       * No worker available. Compute here instead — this blocks the tab
+       * while it runs, which is exactly what the worker exists to avoid, but
+       * it is the difference between slow results and no results at all.
+       * The wait is announced first, and `afterPaint` makes sure that
+       * message is on screen before the thread stops responding.
+       */
+      setMainThread(true);
+      const cancelPaint = afterPaint(() => {
+        if (cancelled) return;
+        try {
+          setReport(buildFindings(dataset, variable, options));
+        } catch (error) {
+          setReportError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        setComputing(false);
+      });
+      return () => {
+        cancelled = true;
+        cancelPaint();
+      };
+    }
+
+    setMainThread(false);
 
     worker.onmessage = (event: MessageEvent<FindingsProgress>) => {
       if (cancelled) return;
@@ -53,15 +90,17 @@ export function OverviewPanel({ dataset }: { dataset: Dataset }) {
       setReportError(event.message || 'The analysis failed.');
       setComputing(false);
     };
+    // Without this, a result that cannot be structured-cloned back leaves the
+    // spinner turning for ever with no error anywhere.
+    worker.onmessageerror = () => {
+      if (cancelled) return;
+      setReportError(
+        'The analysis finished but its result could not be read back from the background thread.',
+      );
+      setComputing(false);
+    };
 
-    const n = dataset.table.sampleIds.length;
-    worker.postMessage({
-      dataset,
-      variable,
-      // Fewer permutations on large datasets, as the beta tab does; the
-      // p-value floor rises from 1/1000 to 1/200, ample at that n.
-      options: { permutations: n > 500 ? 199 : 999 },
-    });
+    worker.postMessage({ dataset, variable, options });
 
     return () => {
       cancelled = true;
@@ -209,13 +248,24 @@ export function OverviewPanel({ dataset }: { dataset: Dataset }) {
           </div>
 
           {computing && (
-            <div className="notice">
+            <div className="notice" role="status" aria-live="polite">
               <span className="spinner" aria-hidden="true" /> Testing community
               structure, diversity and individual taxa by “{variable}”…
+              {mainThread && (
+                <p>
+                  This browser would not run the analysis in the background, so
+                  it is running on the page itself. Nothing is lost, but the
+                  tab will not respond until it finishes.
+                </p>
+              )}
             </div>
           )}
 
-          {reportError && <div className="notice error">{reportError}</div>}
+          {reportError && (
+            <div className="notice error" role="alert">
+              {reportError}
+            </div>
+          )}
 
           {report && (
             <>

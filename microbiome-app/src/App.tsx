@@ -11,6 +11,7 @@ import { AlphaPanel } from './components/AlphaPanel';
 import { BetaPanel } from './components/BetaPanel';
 import { CompositionPanel } from './components/CompositionPanel';
 import { DifferentialPanel } from './components/DifferentialPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { OverviewPanel } from './components/OverviewPanel';
 import { Select } from './components/Select';
 import { loadDataset, type Dataset, type InputKind } from './lib/load';
@@ -34,6 +35,14 @@ export default function App() {
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('Overview');
+  /**
+   * Increments on every successful analysis, and is used as the panels' key.
+   *
+   * A counter rather than the dataset object, because React keys must be
+   * strings or numbers, and rather than something derived from the data,
+   * because re-analysing the same files should still reset the panels.
+   */
+  const [datasetId, setDatasetId] = useState(0);
 
   function run(
     overrides: Partial<{
@@ -75,6 +84,7 @@ export default function App() {
         ),
       );
       setError(null);
+      setDatasetId((id) => id + 1);
     } catch (caught) {
       setDataset(null);
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -207,12 +217,42 @@ export default function App() {
             ))}
           </nav>
 
+          {/*
+            `key={datasetId}` remounts the panels whenever a new dataset is
+            analysed.
+
+            Each panel seeds its grouping variable from the dataset once, with
+            useState. Re-rendering the same instance against a different
+            dataset kept the old variable, and the panel then asked for a
+            metadata column that no longer existed — which threw, and with no
+            error boundary took the whole application down to a blank page.
+            Remounting reseeds every panel from the data actually loaded.
+
+            The boundary inside is the backstop for anything else a single
+            panel can throw: one broken tab should not cost the user the four
+            that work and the files they loaded.
+          */}
           <main>
-            {tab === 'Overview' && <OverviewPanel dataset={dataset} />}
-            {tab === 'Composition' && <CompositionPanel dataset={dataset} />}
-            {tab === 'Alpha diversity' && <AlphaPanel dataset={dataset} />}
-            {tab === 'Beta diversity' && <BetaPanel dataset={dataset} />}
-            {tab === 'Differential' && <DifferentialPanel dataset={dataset} />}
+            <ErrorBoundary
+              label="This tab could not be drawn"
+              resetKey={`${datasetId}:${tab}`}
+            >
+              {tab === 'Overview' && (
+                <OverviewPanel dataset={dataset} key={datasetId} />
+              )}
+              {tab === 'Composition' && (
+                <CompositionPanel dataset={dataset} key={datasetId} />
+              )}
+              {tab === 'Alpha diversity' && (
+                <AlphaPanel dataset={dataset} key={datasetId} />
+              )}
+              {tab === 'Beta diversity' && (
+                <BetaPanel dataset={dataset} key={datasetId} />
+              )}
+              {tab === 'Differential' && (
+                <DifferentialPanel dataset={dataset} key={datasetId} />
+              )}
+            </ErrorBoundary>
           </main>
         </>
       )}
@@ -264,6 +304,14 @@ function FileInput({
             if (looksLikeXlsx(buffer)) {
               const { sheets } = await readXlsx(buffer);
               const sheet = sheets[0];
+              // A workbook with no readable sheet otherwise surfaced as
+              // "Cannot read properties of undefined (reading 'name')",
+              // which tells the user nothing about their file.
+              if (!sheet) {
+                throw new Error(
+                  'This Excel workbook has no readable sheets. Save the data as a .tsv or .csv and try again.',
+                );
+              }
               onLoad(await xlsxToTsv(buffer));
               setNote(
                 sheets.length > 1

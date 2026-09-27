@@ -7,7 +7,7 @@
  * by the caller rather than silently returning a p-value nobody should trust.
  */
 
-import { chiSquareUpperTail, normalCdf } from './distributions.js';
+import { chiSquareUpperTail, normalUpperTail } from './distributions.js';
 import { rankWithTies, tieCorrectionSum } from './ranks.js';
 
 export interface WilcoxonResult {
@@ -62,7 +62,11 @@ export function wilcoxonRankSum(a: number[], b: number[]): WilcoxonResult {
   const corrected = Math.sign(diff) * Math.max(0, Math.abs(diff) - 0.5);
   const z = corrected / Math.sqrt(varU);
 
-  const p = 2 * (1 - normalCdf(Math.abs(z)));
+  // Two-sided, via the upper tail directly. `2 * (1 - normalCdf(|z|))`
+  // cancels to exactly 0 once |z| passes about 8.3 — reachable with two
+  // well-separated groups of 50 — and a p of 0 becomes a q of 0 and an
+  // infinite -log10 on the volcano plot.
+  const p = 2 * normalUpperTail(Math.abs(z));
 
   // Rank-biserial correlation.
   const effectSize = (2 * u) / (n1 * n2) - 1;
