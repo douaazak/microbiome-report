@@ -30,10 +30,33 @@ export function normalCdf(z: number): number {
   return 0.5 * (1 + erf(z / Math.SQRT2));
 }
 
-export function erf(x: number): number {
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
+/**
+ * Upper tail of the standard normal, P(Z > z).
+ *
+ * Exists so callers never write `1 - normalCdf(z)`. That subtraction is
+ * catastrophic cancellation: `normalCdf(8.6)` is 1 to within double
+ * precision, so the difference is exactly 0 and a real p-value of 7e-18 is
+ * reported as p = 0 — which then becomes q = 0 and an infinite -log10 on the
+ * volcano plot. `erfc` below computes the tail directly, without ever forming
+ * the quantity close to 1.
+ *
+ * Accuracy is still bounded by the underlying approximation (see
+ * P_VALUE_PRECISION_FLOOR): the value is positive and correct to a few
+ * significant figures near the threshold, not exact out in the far tail.
+ */
+export function normalUpperTail(z: number): number {
+  return 0.5 * erfc(z / Math.SQRT2);
+}
 
+/*
+ * Abramowitz & Stegun 7.1.26.
+ *
+ * The approximation is naturally expressed as erfc — a polynomial in t times
+ * exp(-x^2) — and erf is then 1 minus that. Writing erfc directly, rather
+ * than as `1 - erf(x)`, is what keeps the small tail values from being
+ * rounded away.
+ */
+function erfcPositive(ax: number): number {
   const p = 0.3275911;
   const a1 = 0.254829592;
   const a2 = -0.284496736;
@@ -42,10 +65,17 @@ export function erf(x: number): number {
   const a5 = 1.061405429;
 
   const t = 1 / (1 + p * ax);
-  const y =
-    1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+  return ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+}
 
-  return sign * y;
+/** Complementary error function, erfc(x) = 1 - erf(x), computed without cancellation. */
+export function erfc(x: number): number {
+  return x >= 0 ? erfcPositive(x) : 2 - erfcPositive(-x);
+}
+
+export function erf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  return sign * (1 - erfcPositive(Math.abs(x)));
 }
 
 /** Natural log of the gamma function (Lanczos approximation). */
@@ -120,9 +150,50 @@ export function lowerGamma(a: number, x: number): number {
   return 1 - q;
 }
 
+/**
+ * Regularised UPPER incomplete gamma function Q(a, x) = 1 - P(a, x).
+ *
+ * Computed directly rather than as `1 - lowerGamma(a, x)`, for the same
+ * reason as `normalUpperTail`: above the crossover the continued fraction
+ * already produces Q, and the old code turned it into P only for the caller
+ * to subtract it back, discarding every bit below 1e-16. That made
+ * `chiSquareUpperTail(80, 2)` return exactly 0 where the true value is
+ * 4.25e-18, and `chiSquareUpperTail(74, 2)` wrong by 30%.
+ */
+export function upperGamma(a: number, x: number): number {
+  if (x < 0 || a <= 0) return NaN;
+  if (x === 0) return 1;
+
+  // Below the crossover the series for P converges quickly and Q is not
+  // small, so 1 - P loses nothing here.
+  if (x < a + 1) return 1 - lowerGamma(a, x);
+
+  // Continued fraction (modified Lentz's method), which yields Q directly.
+  const tiny = 1e-30;
+  let b = x + 1 - a;
+  let c = 1 / tiny;
+  let d = 1 / b;
+  let h = d;
+
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + an / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-15) break;
+  }
+
+  return Math.exp(-x + a * Math.log(x) - logGamma(a)) * h;
+}
+
 /** Upper tail probability of the chi-square distribution. */
 export function chiSquareUpperTail(x: number, df: number): number {
   if (x <= 0) return 1;
   if (df <= 0) return NaN;
-  return 1 - lowerGamma(df / 2, x / 2);
+  return upperGamma(df / 2, x / 2);
 }

@@ -12,9 +12,12 @@ export {
 export {
   chiSquareUpperTail,
   erf,
+  erfc,
   logGamma,
   lowerGamma,
+  upperGamma,
   normalCdf,
+  normalUpperTail,
   P_VALUE_PRECISION_FLOOR,
 } from './distributions.js';
 
