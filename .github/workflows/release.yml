@@ -18,6 +18,17 @@ jobs:
   standalone:
     runs-on: ubuntu-latest
     steps:
+      # workflow_dispatch can be run against any ref, and GITHUB_REF_NAME is
+      # then the branch name -- so dispatching this from main would publish a
+      # release literally tagged "main". Releases are hard to un-publish once
+      # people have linked to them, so refuse instead. To re-run a release,
+      # dispatch this workflow with the tag selected in the ref dropdown.
+      - name: Refuse to release anything that is not a tag
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          echo "::error::This workflow publishes a tagged release, but it was run against ${GITHUB_REF}. Push a tag (git tag v0.2.0 && git push origin v0.2.0), or dispatch this workflow with a tag selected."
+          exit 1
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -44,11 +55,26 @@ jobs:
       - name: Name it for humans
         run: cp microbiome-app/dist/microbiome-report-standalone.html microbiome-report.html
 
+      # If this step fails with "Resource not accessible by integration", the
+      # repository is set to give Actions read-only permissions: fix it at
+      # Settings -> Actions -> General -> Workflow permissions -> Read and
+      # write. The `permissions: contents: write` above cannot grant more than
+      # that setting allows.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" microbiome-report.html \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            || gh release upload "${GITHUB_REF_NAME}" microbiome-report.html --clobber
+          set -euo pipefail
+          # Decide first, rather than running create and falling back to upload
+          # on any failure -- that pattern hid the real error from create
+          # behind a second, identical failure from upload.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} exists; replacing the attached file."
+            gh release upload "${GITHUB_REF_NAME}" microbiome-report.html --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" microbiome-report.html \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
+          gh release view "${GITHUB_REF_NAME}" --json assets \
+            --jq '.assets[] | "attached: \(.name) (\(.size) bytes)"'
