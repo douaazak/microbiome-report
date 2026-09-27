@@ -6,11 +6,13 @@ MicrobiomeAnalyst, Nephele, Namco and MiCloud are all servers you upload to. Tha
 
 ## Get started
 
-**[⬇ Download microbiome-report.html](https://github.com/douaazak/microbiome-report/releases/latest/download/microbiome-report.html)** — then double-click the file your browser saved.
+**[⬇ douaazak.github.io/microbiome-report](https://douaazak.github.io/microbiome-report/)** — one button, then double-click the file your browser saved.
+
+That page is the one to send to colleagues: it downloads the tool in a click, and has a *Try it here first* link so they can see what it does before saving anything. The file alone, if you prefer a direct link, is [microbiome-report.html](https://github.com/douaazak/microbiome-report/releases/latest/download/microbiome-report.html).
 
 That is the whole installation. One file, opened by your normal browser. No Node, no terminal, no account, no server. The file contains the entire application, so it keeps working offline, on a locked-down institutional laptop, and in five years when this repository has moved on.
 
-That link is the release asset, which GitHub serves as a download. Do not save the copy at the top of the file listing instead: GitHub serves files browsed in the repository as plain text, so the browser displays them as a wall of code and "Save link as" writes `microbiome-report.html.txt`, which no longer opens as a page. If that has already happened, renaming the file back to `microbiome-report.html` makes it work. Every tagged [release](https://github.com/douaazak/microbiome-report/releases) carries the same file if you want a specific version.
+Both of those serve the file as a download. Do not save the copy at the top of this file listing instead: GitHub serves files browsed in a repository as plain text, so the browser shows a wall of code and "Save link as" writes `microbiome-report.html.txt`, which no longer opens as a page. If that has already happened, renaming the file back to `microbiome-report.html` fixes it. Every tagged [release](https://github.com/douaazak/microbiome-report/releases) carries the same file if you need a specific version.
 
 Click **Load demo data** to try it before supplying anything of your own.
 

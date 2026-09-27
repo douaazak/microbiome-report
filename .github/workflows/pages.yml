@@ -1,0 +1,77 @@
+name: Pages
+
+# Publishes the landing page at https://douaazak.github.io/microbiome-report/,
+# with the single-file app beside it so the Download button serves a real file.
+#
+# The app is BUILT here rather than committed into docs/. A second copy in the
+# repository would be a 0.6 MB binary-ish blob that silently goes stale the
+# first time someone forgets to rebuild it, and the whole point of the page is
+# that the file behind the button is the current one.
+#
+# Enable once in Settings -> Pages -> Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never publish two builds at once, but let a queued one finish rather than
+# cancelling it: a half-deployed site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: microbiome-app/package-lock.json
+
+      - name: Install
+        working-directory: microbiome-app
+        run: npm ci
+
+      # The tests gate the deploy, as they gate the release. A page that hands
+      # out a broken build is worse than a page that is briefly out of date,
+      # because the file looks fine until someone trusts a number from it.
+      - name: Test
+        working-directory: microbiome-app
+        run: npm test
+
+      - name: Build single-file app
+        working-directory: microbiome-app
+        run: npm run build:standalone
+
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp -r docs/. site/
+          cp microbiome-app/dist/microbiome-report-standalone.html site/microbiome-report.html
+          test -f site/index.html
+          test -f site/microbiome-report.html
+          ls -la site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

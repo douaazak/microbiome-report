@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Microbiome Report — analysis that never uploads your data</title>
+<meta name="description" content="Interactive microbiome analysis that runs entirely in a browser tab. Composition, diversity and differential abundance from your feature table. Your data is never uploaded.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f6f8f8;
+    --border: #d9e0e0;
+    --ink: #16201f;
+    --muted: #55635f;
+    --accent: #0f6b5c;
+    --accent-ink: #ffffff;
+    --accent-soft: #e6f2ef;
+    --focus: #0f6b5c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101614;
+      --surface: #17201e;
+      --border: #2b3936;
+      --ink: #e8efed;
+      --muted: #9fb0ab;
+      --accent: #3fbfa5;
+      --accent-ink: #06211c;
+      --accent-soft: #16302a;
+      --focus: #3fbfa5;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101614;
+    --surface: #17201e;
+    --border: #2b3936;
+    --ink: #e8efed;
+    --muted: #9fb0ab;
+    --accent: #3fbfa5;
+    --accent-ink: #06211c;
+    --accent-soft: #16302a;
+    --focus: #3fbfa5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  header { padding-block: 56px 32px; }
+  h1 { font-size: clamp(2rem, 6vw, 2.9rem); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .tagline { font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--muted); margin: 0 0 8px; max-width: 46ch; }
+  .tagline strong { color: var(--ink); }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 24px; border-radius: 10px;
+    font-size: 1.05rem; font-weight: 600; text-decoration: none;
+    border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-secondary { background: transparent; color: var(--ink); border-color: var(--border); }
+  .btn-secondary:hover { background: var(--surface); }
+  .note { font-size: 0.9rem; color: var(--muted); margin-top: 14px; }
+
+  h2 { font-size: 1.3rem; margin: 48px 0 12px; letter-spacing: -0.01em; }
+  h3 { font-size: 1rem; margin: 0 0 6px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+
+  /* 280px keeps the four cards as a 2x2 at full width rather than 3-then-1,
+     and still collapses to one column on a phone. */
+  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .card p { font-size: 0.93rem; color: var(--muted); margin: 0; }
+
+  .safe { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-top: 18px; }
+  .safe p:last-child { margin-bottom: 0; }
+
+  figure { margin: 22px 0 0; }
+  figure img { width: 100%; height: auto; display: block; border: 1px solid var(--border); border-radius: 10px; }
+  figcaption { font-size: 0.88rem; color: var(--muted); margin-top: 8px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.93rem; margin-top: 10px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-weight: 600; }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  .scroll { overflow-x: auto; }
+
+  code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 0.88em; }
+
+  footer { margin-top: 64px; padding-block: 24px 48px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Microbiome Report</h1>
+    <p class="tagline">Composition, diversity and differential abundance from your feature table — <strong>computed in your own browser, never uploaded.</strong></p>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="microbiome-report.html" download="microbiome-report.html">⬇ Download the app</a>
+      <a class="btn btn-secondary" href="microbiome-report.html">Try it here first</a>
+    </div>
+    <p class="note">One HTML file, about 0.6 MB. Save it, double-click it, and it opens in the browser you already have. No installer, no terminal, no account, no sign-up.</p>
+  </header>
+
+  <h2>Why not just use a web tool?</h2>
+  <p>MicrobiomeAnalyst, Nephele, Namco and MiCloud are servers you upload to. That is structural, not a feature gap, and it is why many hospital IRBs and consent terms rule them out.</p>
+
+  <div class="safe">
+    <p><strong>This tool has no server at all.</strong> There is no upload code and no network call anywhere in it. Your table is read by the browser from your own disk, and every number is computed on your machine.</p>
+    <p>You do not have to take that on trust. Download the file, disconnect from the network, and use it exactly as normal — or watch your browser's network tab while you work. Both are quicker than reading a privacy policy.</p>
+    <p>“Try it here first” loads the page itself from GitHub, as any web page would. Even then, no data you load goes anywhere: the analysis runs in the tab. Downloading is still the better habit for real samples, because then nothing is involved but your own computer.</p>
+  </div>
+
+  <h2>What it does</h2>
+  <div class="cards">
+    <div class="card"><h3>Composition</h3><p>Stacked relative abundance per sample, grouped by any metadata column, with each group's span bracketed and labelled.</p></div>
+    <div class="card"><h3>Alpha diversity</h3><p>Shannon, Simpson, Chao1, observed richness and evenness, with the group comparison tested.</p></div>
+    <div class="card"><h3>Beta diversity</h3><p>PCoA on Bray–Curtis, Jaccard or Aitchison distance, with PERMANOVA.</p></div>
+    <div class="card"><h3>Differential abundance</h3><p>CLR plus Wilcoxon or Kruskal–Wallis per taxon, Benjamini–Hochberg across taxa, as a volcano plot and a sortable table.</p></div>
+  </div>
+  <p style="margin-top:18px">Every figure exports as SVG, and the numbers behind it as TSV. Parsing reports what it found and what it had to do — mixed <code>d__</code>/<code>k__</code> prefixes, stripped whitespace, samples dropped in the metadata join, uneven sequencing depth — before any analysis runs.</p>
+
+  <h2>What to load</h2>
+  <p>Only the feature table is required. Taxonomy and metadata each unlock more of the tool, and the interface says which analyses are unavailable without them rather than failing. Every file may be TSV, CSV or Excel <code>.xlsx</code>.</p>
+  <div class="scroll">
+    <table>
+      <tr><th>File</th><th>What it is</th></tr>
+      <tr><td>Feature table</td><td>Features down the rows, samples across the columns. Counts or relative abundances both work, and a transposed table is detected. QIIME 2, DADA2 and MetaPhlAn output are all read directly.</td></tr>
+      <tr><td>Taxonomy</td><td>Optional. Lineage strings as QIIME 2 and SILVA produce them, or one column per rank as mothur, DADA2 and TaxAss produce them. A gap in a lineage is never filled by shifting a lower rank up.</td></tr>
+      <tr><td>Metadata</td><td>Optional. One row per sample. The sample-ID column is found by matching against the table, so it need not be first or carry a particular name.</td></tr>
+    </table>
+  </div>
+  <p style="margin-top:16px">Click <strong>Load demo data</strong> inside the tool to try all of it before supplying anything of your own.</p>
+
+  <h2>What it looks like</h2>
+  <figure>
+    <img src="screenshots/02-overview.png" alt="The Overview tab: parse diagnostics, a dataset summary, group sizes, and the headline findings stated in plain sentences.">
+    <figcaption>Overview summarises the dataset and states the significant findings — with the non-significant ones named too, so absence of evidence is not hidden.</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshots/05-beta-diversity.png" alt="The Beta diversity tab: a PCoA ordination coloured by study group, with the PERMANOVA result printed beneath it.">
+    <figcaption>Beta diversity: PCoA with PERMANOVA, and the caveats that matter stated next to the plot.</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshots/06-differential.png" alt="The Differential tab: filter controls, a volcano plot, and a sortable results table of per-taxon statistics.">
+    <figcaption>Differential abundance, as a volcano plot and a sortable table. The q column is the one to read.</figcaption>
+  </figure>
+
+  <footer>
+    <p>Source, issues and older versions: <a href="https://github.com/douaazak/microbiome-report">github.com/douaazak/microbiome-report</a> · <a href="https://github.com/douaazak/microbiome-report/releases">all releases</a> · MIT licence.</p>
+    <p>Validated against two published datasets; the checks and their findings are in the repository.</p>
+  </footer>
+
+</div>
+</body>
+</html>
